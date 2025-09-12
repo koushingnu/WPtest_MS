@@ -92,6 +92,51 @@ class AIAP_Lite_Box {
     function register() {
         register_setting('aiap_lite_group', self::OPT_KEY);
 
+        // 中項目の追加・削除処理
+        if (isset($_POST['add_topic']) && isset($_POST['_wpnonce'])) {
+            if (wp_verify_nonce($_POST['_wpnonce'], 'aiap_topic_action')) {
+                $new_title = sanitize_text_field($_POST['new_topic_title']);
+                $new_keywords = sanitize_text_field($_POST['new_topic_keywords']);
+                
+                if (!empty($new_title)) {
+                    $o = get_option(self::OPT_KEY, array());
+                    $new_id = 'topic_' . time();
+                    
+                    $sub_topics = isset($o['sub_topics']) ? $o['sub_topics'] : array();
+                    $sub_topics[$new_id] = array(
+                        'id' => $new_id,
+                        'title' => $new_title,
+                        'keywords' => $new_keywords,
+                        'enabled' => true
+                    );
+                    
+                    $o['sub_topics'] = $sub_topics;
+                    update_option(self::OPT_KEY, $o);
+                    
+                    $this->set_notice('success', '新しい項目を追加しました。');
+                }
+            }
+            wp_redirect(add_query_arg(array('page' => 'aiap-lite', 'tab' => 'content_settings'), admin_url('options-general.php')));
+            exit;
+        }
+
+        if (isset($_POST['delete_topic']) && isset($_POST['_wpnonce'])) {
+            if (wp_verify_nonce($_POST['_wpnonce'], 'aiap_topic_action')) {
+                $topic_id = sanitize_text_field($_POST['topic_id']);
+                $o = get_option(self::OPT_KEY, array());
+                
+                if (isset($o['sub_topics'][$topic_id])) {
+                    $title = $o['sub_topics'][$topic_id]['title'];
+                    unset($o['sub_topics'][$topic_id]);
+                    update_option(self::OPT_KEY, $o);
+                    
+                    $this->set_notice('success', sprintf('「%s」を削除しました。', esc_html($title)));
+                }
+            }
+            wp_redirect(add_query_arg(array('page' => 'aiap-lite', 'tab' => 'content_settings'), admin_url('options-general.php')));
+            exit;
+        }
+
         // === OpenAI設定タブ ===
         add_settings_section('main', 'API設定', '__return_false', 'aiap-lite-main');
         add_settings_field('api_key', 'OpenAI API Key', function() {
@@ -154,129 +199,54 @@ class AIAP_Lite_Box {
             ?></textarea>
         <?php }, 'aiap-lite-content_gen', 'content_gen');
 
-        // 中項目の管理
+        // 中項目の管理（カテゴリベース）
         add_settings_field('sub_topics_manager', '中項目の管理', function() {
-            // 新規追加の処理
-            if (isset($_POST['add_topic'])) {
-                check_admin_referer('aiap_topic_action');
-                
-                $new_title = sanitize_text_field($_POST['new_topic_title']);
-                $new_keywords = sanitize_text_field($_POST['new_topic_keywords']);
-                
-                if (!empty($new_title)) {
-                    $o = get_option(self::OPT_KEY, array());
-                    $new_id = 'topic_' . time();
-                    
-                    // 既存の項目を保持
-                    $sub_topics = isset($o['sub_topics']) ? $o['sub_topics'] : array();
-                    
-                    // 新規項目を追加
-                    $sub_topics[$new_id] = array(
-                        'id' => $new_id,
-                        'title' => $new_title,
-                        'keywords' => $new_keywords,
-                        'enabled' => true
-                    );
-                    
-                    $o['sub_topics'] = $sub_topics;
-                    update_option(self::OPT_KEY, $o);
-                    
-                    $this->set_notice('success', '新しい項目を追加しました。');
-                } else {
-                    $this->set_notice('error', '項目タイトルを入力してください。');
-                }
-                
-                // 同じページにリダイレクト（GETパラメータを保持）
-                wp_safe_redirect(wp_get_referer() ?: admin_url('options-general.php?page=aiap-lite&tab=content_settings'));
-                exit;
-            }
-
-            // 削除の処理
-            if (isset($_POST['delete_topic'])) {
-                check_admin_referer('aiap_topic_action');
-                
-                $topic_id = sanitize_text_field($_POST['topic_id']);
-                $o = get_option(self::OPT_KEY, array());
-                
-                if (isset($o['sub_topics'][$topic_id])) {
-                    $title = $o['sub_topics'][$topic_id]['title'];
-                    unset($o['sub_topics'][$topic_id]);
-                    update_option(self::OPT_KEY, $o);
-                    
-                    $this->set_notice('success', sprintf('「%s」を削除しました。', esc_html($title)));
-                }
-                
-                // 同じページにリダイレクト（GETパラメータを保持）
-                wp_safe_redirect(wp_get_referer() ?: admin_url('options-general.php?page=aiap-lite&tab=content_settings'));
-                exit;
-            }
-
-            // 現在の項目を取得
             $o = get_option(self::OPT_KEY, array());
-            $sub_topics = isset($o['sub_topics']) ? $o['sub_topics'] : array(
-                'topic_1' => array(
-                    'id' => 'topic_1',
-                    'title' => '治療法と効果',
-                    'keywords' => '治療,効果,改善,期間',
-                    'enabled' => true
-                ),
-                'topic_2' => array(
-                    'id' => 'topic_2',
-                    'title' => '費用と料金比較',
-                    'keywords' => '費用,料金,保険,比較',
-                    'enabled' => true
-                )
-            );
+            $categories = get_categories(array(
+                'hide_empty' => false,
+                'orderby' => 'name',
+                'order' => 'ASC'
+            ));
+
+            // キーワード設定を取得
+            $topic_keywords = isset($o['topic_keywords']) ? $o['topic_keywords'] : array();
+            $topic_enabled = isset($o['topic_enabled']) ? $o['topic_enabled'] : array();
             ?>
             <div class="sub-topics-manager">
-                <!-- 新規追加フォーム -->
-                <form method="post" style="margin-bottom: 20px; padding: 15px; background: #f8f8f8; border-radius: 5px;">
-                    <?php wp_nonce_field('aiap_topic_action'); ?>
-                    <h4 style="margin-top: 0;">新規項目の追加</h4>
-                    <div style="display: flex; gap: 10px; margin-bottom: 10px;">
-                        <input type="text" name="new_topic_title" class="regular-text" 
-                               placeholder="項目タイトル（例：治療法と効果）" style="flex: 2;" required>
-                        <input type="text" name="new_topic_keywords" class="regular-text" 
-                               placeholder="キーワード（カンマ区切り。例：治療,効果,改善,期間）" style="flex: 3;">
-                        <input type="submit" name="add_topic" class="button button-secondary" value="追加">
-                    </div>
-                </form>
-
-                <!-- 項目リスト -->
                 <div class="topics-list">
-                    <?php if (empty($sub_topics)) : ?>
-                        <div class="notice notice-warning">
-                            <p>中項目が設定されていません。上のフォームから追加してください。</p>
-                        </div>
-                    <?php else : ?>
-                        <?php foreach ($sub_topics as $topic) : ?>
+                    <?php if (!empty($categories)) : ?>
+                        <?php foreach ($categories as $category) : ?>
                             <div class="topic-item" style="margin-bottom: 10px; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
                                 <div style="display: flex; gap: 10px; align-items: center;">
-                                    <input type="text" name="<?php echo esc_attr(self::OPT_KEY); ?>[sub_topics][<?php echo esc_attr($topic['id']); ?>][title]" 
-                                           value="<?php echo esc_attr($topic['title']); ?>" class="regular-text" style="flex: 2;">
-                                    <input type="text" name="<?php echo esc_attr(self::OPT_KEY); ?>[sub_topics][<?php echo esc_attr($topic['id']); ?>][keywords]" 
-                                           value="<?php echo esc_attr($topic['keywords']); ?>" class="regular-text" style="flex: 3;">
+                                    <span class="topic-title" style="font-weight: bold; min-width: 200px;">
+                                        <?php echo esc_html($category->name); ?>
+                                    </span>
+                                    <input type="text" 
+                                           name="<?php echo esc_attr(self::OPT_KEY); ?>[topic_keywords][<?php echo esc_attr($category->term_id); ?>]" 
+                                           value="<?php echo esc_attr(isset($topic_keywords[$category->term_id]) ? $topic_keywords[$category->term_id] : ''); ?>" 
+                                           placeholder="キーワード（カンマ区切り）"
+                                           class="regular-text"
+                                           style="flex: 1;">
                                     <label style="white-space: nowrap;">
-                                        <input type="checkbox" name="<?php echo esc_attr(self::OPT_KEY); ?>[sub_topics][<?php echo esc_attr($topic['id']); ?>][enabled]" 
-                                               value="1" <?php checked($topic['enabled'], true); ?>>
+                                        <input type="checkbox" 
+                                               name="<?php echo esc_attr(self::OPT_KEY); ?>[topic_enabled][<?php echo esc_attr($category->term_id); ?>]" 
+                                               value="1"
+                                               <?php checked(isset($topic_enabled[$category->term_id]) && $topic_enabled[$category->term_id]); ?>>
                                         有効
                                     </label>
-                                    <form method="post" style="margin: 0;">
-                                        <?php wp_nonce_field('aiap_topic_action'); ?>
-                                        <input type="hidden" name="topic_id" value="<?php echo esc_attr($topic['id']); ?>">
-                                        <button type="submit" name="delete_topic" class="button button-link-delete" 
-                                                onclick="return confirm('「<?php echo esc_js($topic['title']); ?>」を削除してもよろしいですか？');">
-                                            削除
-                                        </button>
-                                    </form>
                                 </div>
                             </div>
                         <?php endforeach; ?>
+                    <?php else : ?>
+                        <div class="notice notice-warning">
+                            <p>カテゴリが設定されていません。WordPressの投稿カテゴリを追加してください。</p>
+                        </div>
                     <?php endif; ?>
                 </div>
-                <p class="description">中項目を管理します。有効な項目からランダムに選択して記事が生成されます。</p>
+                <p class="description">カテゴリから中項目を管理します。有効な項目からランダムに選択して記事が生成されます。<br>カテゴリの追加・編集・削除は投稿 > カテゴリから行ってください。</p>
             </div>
-        <?php }, 'aiap-lite-content_gen', 'content_gen');
+            <?php
+        }, 'aiap-lite-content_gen', 'content_gen');
 
         // 中項目と小項目の設定
     }
@@ -440,6 +410,16 @@ class AIAP_Lite_Box {
             $api_key = trim(isset($o['api_key']) ? $o['api_key'] : '');
             if (!$api_key) {
                 throw new Exception('APIキーが未設定です');
+            }
+
+            // 有効な中項目（カテゴリ）があるかチェック
+            $topic_enabled = isset($o['topic_enabled']) ? $o['topic_enabled'] : array();
+            $enabled_categories = array_filter($topic_enabled, function($enabled) {
+                return $enabled === '1';
+            });
+            
+            if (empty($enabled_categories)) {
+                throw new Exception('有効な中項目が設定されていません。少なくとも1つのカテゴリを有効にしてください。');
             }
 
             // 題材生成

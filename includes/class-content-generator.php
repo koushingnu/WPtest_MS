@@ -22,43 +22,33 @@ class AIAP_Content_Generator {
         $o = get_option('aiap_lite_settings', array());
         $main_topic = isset($o['main_topic']) ? trim($o['main_topic']) : 'AGA';
         
-        // 有効な中項目を取得
-        $default_structure = array(
-            '治療薬・お薬' => array('enabled' => true, 'details' => ""),
-            'クリニック比較' => array('enabled' => true, 'details' => ""),
-            '費用・料金' => array('enabled' => true, 'details' => ""),
-            '治療効果' => array('enabled' => true, 'details' => ""),
-            '副作用・リスク' => array('enabled' => true, 'details' => ""),
-            '選び方・基準' => array('enabled' => true, 'details' => ""),
-            '体験談・口コミ' => array('enabled' => true, 'details' => "")
-        );
+        // 有効なカテゴリ（中項目）を取得
+        $topic_enabled = isset($o['topic_enabled']) ? $o['topic_enabled'] : array();
+        $topic_keywords = isset($o['topic_keywords']) ? $o['topic_keywords'] : array();
         
-        $structure = isset($o['topic_structure']) ? $o['topic_structure'] : $default_structure;
-        
-        // 有効な中項目のみを抽出
-        $available_topics = array();
-        foreach ($structure as $topic => $config) {
-            if (!empty($config['enabled'])) {
-                $available_topics[$topic] = $config;
+        // 有効なカテゴリのIDを抽出
+        $enabled_category_ids = array();
+        foreach ($topic_enabled as $cat_id => $enabled) {
+            if ($enabled === '1') {
+                $enabled_category_ids[] = $cat_id;
             }
         }
         
-        if (empty($available_topics)) {
-            throw new Exception('有効な中項目が設定されていません。');
+        if (empty($enabled_category_ids)) {
+            throw new Exception('有効なカテゴリ（中項目）が設定されていません。');
         }
         
-        // ランダムに中項目を選択
-        $selected_topic = array_rand($available_topics);
-        $selected_config = $available_topics[$selected_topic];
+        // ランダムにカテゴリを選択
+        $selected_cat_id = $enabled_category_ids[array_rand($enabled_category_ids)];
         
-        // 小項目の取得（設定されている場合のみ）
-        $detail_topic = '';
-        if (!empty($selected_config['details'])) {
-            $detail_topics = array_filter(array_map('trim', explode("\n", $selected_config['details'])));
-            if (!empty($detail_topics)) {
-                $detail_topic = $detail_topics[array_rand($detail_topics)];
-            }
+        // 選択されたカテゴリの情報を取得
+        $selected_category = get_category($selected_cat_id);
+        if (!$selected_category) {
+            throw new Exception('選択されたカテゴリの取得に失敗しました。');
         }
+        
+        $selected_topic = $selected_category->name;
+        $selected_keywords = isset($topic_keywords[$selected_cat_id]) ? $topic_keywords[$selected_cat_id] : '';
 
         $system = "あなたは{$main_topic}専門の日本語ライター。必ずJSONのみ返す。Markdown/HTMLは返さない。";
         
