@@ -90,7 +90,67 @@ class AIAP_Lite_Box {
     }
 
     function register() {
-        register_setting('aiap_lite_group', self::OPT_KEY);
+        register_setting('aiap_lite_group', self::OPT_KEY, array(
+            'type' => 'array',
+            'sanitize_callback' => function($value) {
+                if (!is_array($value)) {
+                    $value = array();
+                }
+
+                // 既存の設定を取得
+                $current_settings = get_option(self::OPT_KEY, array());
+                
+                // 現在のタブを取得
+                $current_tab = isset($_GET['tab']) ? sanitize_key($_GET['tab']) : 'api_settings';
+                
+                // タブごとの設定キーを定義
+                $tab_settings = array(
+                    'api_settings' => array('api_key'),
+                    'image_settings' => array('gen_featured', 'theme', 'detail'),
+                    'post_settings' => array('post_status'),
+                    'content_settings' => array('main_topic', 'main_topic_desc', 'topic_keywords', 'topic_enabled')
+                );
+                
+                // 現在のタブ以外の設定を保持
+                foreach ($tab_settings as $tab => $fields) {
+                    if ($tab !== $current_tab) {
+                        foreach ($fields as $field) {
+                            if (isset($current_settings[$field])) {
+                                $value[$field] = $current_settings[$field];
+                            }
+                        }
+                    }
+                }
+                
+                // APIキーのサニタイズ
+                if (isset($value['api_key'])) {
+                    $value['api_key'] = trim(sanitize_text_field($value['api_key']));
+                }
+                
+                // その他の設定のサニタイズ
+                $text_fields = array('main_topic', 'main_topic_desc', 'theme', 'detail');
+                foreach ($text_fields as $field) {
+                    if (isset($value[$field])) {
+                        $value[$field] = sanitize_text_field($value[$field]);
+                    }
+                }
+                
+                // カテゴリ関連の設定
+                if (isset($value['topic_keywords']) && is_array($value['topic_keywords'])) {
+                    foreach ($value['topic_keywords'] as $cat_id => $keywords) {
+                        $value['topic_keywords'][$cat_id] = sanitize_text_field($keywords);
+                    }
+                }
+                
+                if (isset($value['topic_enabled']) && is_array($value['topic_enabled'])) {
+                    foreach ($value['topic_enabled'] as $cat_id => $enabled) {
+                        $value['topic_enabled'][$cat_id] = $enabled ? '1' : '0';
+                    }
+                }
+                
+                return $value;
+            }
+        ));
 
         // 中項目の追加・削除処理
         if (isset($_POST['add_topic']) && isset($_POST['_wpnonce'])) {
@@ -437,12 +497,21 @@ class AIAP_Lite_Box {
                 $post_content = serialize_blocks($blocks);
             }
 
-            $post_id = wp_insert_post(array(
+            // 投稿を作成
+            $post_data = array(
                 'post_title'   => $final_title,
                 'post_content' => $post_content,
                 'post_status'  => isset($o['post_status']) ? $o['post_status'] : 'draft',
                 'post_author'  => get_current_user_id() ?: 1
-            ), true);
+            );
+
+            // 選択されたカテゴリを設定
+            $category_id = $this->content_generator->get_current_category_id();
+            if ($category_id) {
+                $post_data['post_category'] = array($category_id);
+            }
+
+            $post_id = wp_insert_post($post_data, true);
 
             if (is_wp_error($post_id)) {
                 throw new Exception($post_id->get_error_message());
@@ -479,14 +548,33 @@ class AIAP_Lite_Box {
             // 完了通知とリダイレクト
             $this->set_notice('success', '記事生成が完了しました', get_edit_post_link($post_id, ''));
             $this->release_lock();
-            wp_safe_redirect(admin_url('options-general.php?page=aiap-lite&tab=content_settings'));
+            
+            // リダイレクト先のURLを生成（現在の設定を保持）
+            $redirect_url = add_query_arg(
+                array(
+                    'page' => 'aiap-lite',
+                    'tab' => 'content_settings',
+                    'settings-updated' => 1
+                ),
+                admin_url('options-general.php')
+            );
+            wp_safe_redirect($redirect_url);
             exit;
 
         } catch (Exception $e) {
             error_log('AI Auto Poster 記事生成エラー: ' . $e->getMessage());
             $this->set_notice('error', 'エラーが発生しました: ' . $e->getMessage());
             $this->release_lock();
-            wp_safe_redirect(admin_url('options-general.php?page=aiap-lite&tab=content_settings'));
+            // リダイレクト先のURLを生成（現在の設定を保持）
+            $redirect_url = add_query_arg(
+                array(
+                    'page' => 'aiap-lite',
+                    'tab' => 'content_settings',
+                    'settings-updated' => 1
+                ),
+                admin_url('options-general.php')
+            );
+            wp_safe_redirect($redirect_url);
             exit;
         }
     }

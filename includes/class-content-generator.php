@@ -6,6 +6,7 @@ class AIAP_Content_Generator {
     private $openai_client;
     private $logger;
     private $current_angle = '';
+    private $current_category_id = 0;
 
     public function __construct($openai_client, $logger) {
         $this->openai_client = $openai_client;
@@ -49,6 +50,9 @@ class AIAP_Content_Generator {
         
         $selected_topic = $selected_category->name;
         $selected_keywords = isset($topic_keywords[$selected_cat_id]) ? $topic_keywords[$selected_cat_id] : '';
+        
+        // 選択されたカテゴリIDを保存（投稿時に使用）
+        $this->current_category_id = $selected_cat_id;
 
         $system = "あなたは{$main_topic}専門の日本語ライター。必ずJSONのみ返す。Markdown/HTMLは返さない。";
         
@@ -180,5 +184,9 @@ EOT;
 
     public function get_current_angle() {
         return $this->current_angle;
+    }
+
+    public function get_current_category_id() {
+        return $this->current_category_id;
     }
 }
