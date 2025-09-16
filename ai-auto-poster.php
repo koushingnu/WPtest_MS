@@ -314,7 +314,7 @@ class AIAP_Lite_Box {
             </nav>
 
             <div class="aiap-content">
-                <form method="post" action="options.php">
+            <form method="post" action="options.php">
                 <?php 
                 settings_fields('aiap_lite_group');
                 
@@ -327,25 +327,84 @@ class AIAP_Lite_Box {
                 
                 submit_button(); 
                 ?>
-                </form>
+            </form>
 
-                <?php if ($current_tab === 'content_settings') : ?>
-                    <?php if ($this->is_locked()) : ?>
-                        <div class="notice notice-info">
-                            <p>
-                                <span class="spinner is-active" style="float:left;margin:0 8px 0 0;"></span>
-                                記事を生成中です。このままお待ちください...
-                            </p>
-                        </div>
-                    <?php else : ?>
-                        <div class="aiap-test-run" style="margin: 20px 0;">
-                            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
-                                <?php wp_nonce_field('aiap_run'); ?>
-                                <input type="hidden" name="action" value="aiap_queue_job">
-                                <button type="submit" class="button button-secondary">今すぐ実行（テスト投稿）</button>
-                            </form>
-                        </div>
-                    <?php endif; ?>
+                <?php if ($this->is_locked()) : ?>
+                    <div class="notice notice-info">
+                        <p>
+                            <span class="spinner is-active" style="float:left;margin:0 8px 0 0;"></span>
+                            記事を生成中です。このままお待ちください...
+                        </p>
+                    </div>
+                <?php else : ?>
+                    <div class="aiap-test-run" style="margin: 20px 0; padding: 15px; background: #f8f8f8; border: 1px solid #ddd; border-radius: 4px;">
+                        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" id="test-post-form">
+                            <?php wp_nonce_field('aiap_lite_group-options'); ?>
+                            <input type="hidden" name="action" value="aiap_queue_job">
+                            <input type="hidden" name="option_page" value="aiap_lite_group">
+                            <input type="hidden" name="_wp_http_referer" value="<?php echo esc_attr(admin_url('options-general.php?page=aiap-lite&tab=' . $current_tab)); ?>">
+                            <?php
+                            // 現在のフォームの値を取得
+                            $current_settings = get_option(self::OPT_KEY, array());
+                            
+                            // フォームフィールドの値を取得
+                            $fields = array(
+                                'openai_api_key',
+                                'gen_featured',
+                                'theme',
+                                'detail',
+                                'main_topic',
+                                'main_topic_desc',
+                                'topic_keywords',
+                                'topic_enabled'
+                            );
+                            
+                            foreach ($fields as $field) {
+                                if (isset($_POST['aiap_lite_settings'][$field])) {
+                                    if (is_array($_POST['aiap_lite_settings'][$field])) {
+                                        foreach ($_POST['aiap_lite_settings'][$field] as $key => $value) {
+                                            printf(
+                                                '<input type="hidden" name="aiap_lite_settings[%s][%s]" value="%s">',
+                                                esc_attr($field),
+                                                esc_attr($key),
+                                                esc_attr($value)
+                                            );
+                                        }
+                                    } else {
+                                        printf(
+                                            '<input type="hidden" name="aiap_lite_settings[%s]" value="%s">',
+                                            esc_attr($field),
+                                            esc_attr($_POST['aiap_lite_settings'][$field])
+                                        );
+                                    }
+                                } elseif (isset($current_settings[$field])) {
+                                    if (is_array($current_settings[$field])) {
+                                        foreach ($current_settings[$field] as $key => $value) {
+                                            printf(
+                                                '<input type="hidden" name="aiap_lite_settings[%s][%s]" value="%s">',
+                                                esc_attr($field),
+                                                esc_attr($key),
+                                                esc_attr($value)
+                                            );
+                                        }
+                                    } else {
+                                        printf(
+                                            '<input type="hidden" name="aiap_lite_settings[%s]" value="%s">',
+                                            esc_attr($field),
+                                            esc_attr($current_settings[$field])
+                                        );
+                                    }
+                                }
+                            }
+                            ?>
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <button type="submit" class="button button-primary">今すぐ実行（テスト投稿）</button>
+                                <span class="description">
+                                    現在の設定で記事を生成します。（未保存の設定も自動的に保存されます）
+                                </span>
+                            </div>
+            </form>
+                    </div>
                 <?php endif; ?>
             </div>
         </div>
@@ -414,7 +473,7 @@ class AIAP_Lite_Box {
     }
 
     function handle_queue_job() {
-        check_admin_referer('aiap_run');
+        check_admin_referer('aiap_lite_group-options');
         
         if (!current_user_can('manage_options')) {
             wp_die('権限がありません');
@@ -425,6 +484,39 @@ class AIAP_Lite_Box {
             $this->set_notice('error', '記事生成の処理が既に実行中です。完了までお待ちください。');
             wp_safe_redirect(admin_url('options-general.php?page=aiap-lite&tab=content_settings'));
             exit;
+        }
+
+        // 現在のタブの設定を保存
+        if (isset($_POST['aiap_lite_settings'])) {
+            // 既存の設定を取得
+            $current_settings = get_option(self::OPT_KEY, array());
+            
+            // POSTされた設定をサニタイズして既存の設定とマージ
+            $new_settings = $_POST['aiap_lite_settings'];
+            if (is_array($new_settings)) {
+                foreach ($new_settings as $key => $val) {
+                    if (is_array($val)) {
+                        $current_settings[$key] = array_map('sanitize_text_field', $val);
+                    } else {
+                        $current_settings[$key] = sanitize_text_field($val);
+                    }
+                }
+                
+                // チェックボックスの特別処理
+                if (isset($new_settings['gen_featured'])) {
+                    $current_settings['gen_featured'] = '1';
+                }
+                
+                // カテゴリの有効/無効の特別処理
+                if (isset($new_settings['topic_enabled']) && is_array($new_settings['topic_enabled'])) {
+                    foreach ($new_settings['topic_enabled'] as $cat_id => $enabled) {
+                        $current_settings['topic_enabled'][$cat_id] = $enabled ? '1' : '0';
+                    }
+                }
+                
+                // 設定を保存
+                update_option(self::OPT_KEY, $current_settings);
+            }
         }
         
         // APIキーチェック
@@ -500,7 +592,7 @@ class AIAP_Lite_Box {
                 try {
                     $hint = trim(isset($o['image_hint']) ? $o['image_hint'] : '');
                     $img_prompt = $this->image_generator->build_prompt($final_title, $angle, $hint);
-                    
+
                     $err = '';
                     $b64 = $this->openai_client->generate_image($api_key, $img_prompt, '1792x1024', $err);
                     
@@ -509,8 +601,8 @@ class AIAP_Lite_Box {
                     }
                     
                     if ($b64) {
-                        $msg = '';
-                        $att_id = $this->image_generator->save_as_attachment($b64, $final_title, $post_id, $msg);
+                    $msg = '';
+                    $att_id = $this->image_generator->save_as_attachment($b64, $final_title, $post_id, $msg);
                         if ($att_id) {
                             $this->image_generator->set_featured_image($post_id, $att_id);
                         }
