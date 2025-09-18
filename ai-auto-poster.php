@@ -188,6 +188,26 @@ class AIAP_Lite_Box {
             echo '<p>投稿の基本設定を行います。</p>';
         }, 'aiap-lite-post_config');
 
+        // 定期実行の設定
+        add_settings_section('auto_post', '定期実行設定', function() {
+            echo '<p>記事の自動生成を定期的に実行する設定です。</p>';
+            echo '<div class="notice notice-info inline">';
+            echo '<p><strong>注意：</strong> 定期実行にはサーバーのCron設定が必要です。</p>';
+            echo '<p>さくらのレンタルサーバーの場合、以下のようにCronを設定してください：</p>';
+            echo '<pre style="background: #f8f8f8; padding: 10px; overflow-x: auto;">';
+            echo '# 毎日10時に実行する例（時間は設定に合わせて変更してください）\n';
+            echo '0 10 * * * php ' . ABSPATH . 'wp-content/plugins/ai-auto-poster/cron/generate_post.php</pre>';
+            echo '</div>';
+        }, 'aiap-lite-post_config');
+
+        add_settings_field('auto_post_enabled', '定期実行', function() {
+            $o = get_option(self::OPT_KEY, array());
+            $checked = isset($o['auto_post_enabled']) && $o['auto_post_enabled'] === '1' ? 'checked' : '';
+            echo '<label><input type="checkbox" name="' . esc_attr(self::OPT_KEY) . '[auto_post_enabled]" value="1" ' . $checked . '> 有効にする</label>';
+            echo '<p class="description">チェックを入れると、設定した時間に自動で記事を生成します。</p>';
+        }, 'aiap-lite-post_config', 'auto_post');
+
+
         add_settings_field('post_status', '投稿ステータス', function() {
             $o = get_option(self::OPT_KEY, array());
             $v = isset($o['post_status']) ? $o['post_status'] : 'draft'; ?>
@@ -445,7 +465,7 @@ class AIAP_Lite_Box {
     /* ========== スタイル ========== */
 
 
-    private function is_locked() {
+    public function is_locked() {
         $lock = get_transient(self::LOCK_KEY);
         if ($lock) {
             $lock_time = strtotime($lock['started_at']);
@@ -461,15 +481,122 @@ class AIAP_Lite_Box {
         return false;
     }
 
-    private function set_lock() {
+    public function set_lock() {
         return set_transient(self::LOCK_KEY, [
             'started_at' => current_time('mysql'),
             'user_id' => get_current_user_id()
         ], 600); // 10分でタイムアウト
     }
 
-    private function release_lock() {
+    public function release_lock() {
         delete_transient(self::LOCK_KEY);
+    }
+
+    function handle_daily_post() {
+        $o = get_option(self::OPT_KEY, array());
+        
+        // 自動投稿が有効かチェック
+        if (!isset($o['auto_post_enabled']) || $o['auto_post_enabled'] !== '1') {
+            error_log('AI Auto Poster: 自動投稿が無効です');
+            return;
+        }
+
+        // 実行中チェック
+        if ($this->is_locked()) {
+            error_log('AI Auto Poster: 前回の処理が完了していないため、スキップします');
+            return;
+        }
+
+        try {
+            // ロックを設定
+            $this->set_lock();
+            
+            // 実行時間を延長（5分）
+            set_time_limit(300);
+            
+            // APIキーチェック
+            $api_key = trim(isset($o['api_key']) ? $o['api_key'] : '');
+            if (!$api_key) {
+                throw new Exception('APIキーが未設定です');
+            }
+
+            // 有効な中項目（カテゴリ）があるかチェック
+            $topic_enabled = isset($o['topic_enabled']) ? $o['topic_enabled'] : array();
+            $enabled_categories = array_filter($topic_enabled, function($enabled) {
+                return $enabled === '1';
+            });
+            
+            if (empty($enabled_categories)) {
+                throw new Exception('有効な中項目が設定されていません');
+            }
+
+            // 題材生成
+            list($title, $angle, $outline) = $this->content_generator->generate_topic($api_key);
+            
+            // 本文生成
+            $data = $this->content_generator->generate_content($api_key, $title, $angle, $outline);
+            $final_title = sanitize_text_field(isset($data['title']) ? $data['title'] : $title);
+            
+            // 投稿作成
+            $post_content = $this->block_converter->convert_sections($data['sections']);
+            
+            if (function_exists('parse_blocks') && function_exists('serialize_blocks')) {
+                $blocks = parse_blocks($post_content);
+                $post_content = serialize_blocks($blocks);
+            }
+
+            // 投稿を作成
+            $post_data = array(
+                'post_title'   => $final_title,
+                'post_content' => $post_content,
+                'post_status'  => isset($o['post_status']) ? $o['post_status'] : 'draft',
+                'post_author'  => 1
+            );
+
+            // 選択されたカテゴリを設定
+            $category_id = $this->content_generator->get_current_category_id();
+            if ($category_id) {
+                $post_data['post_category'] = array($category_id);
+            }
+
+            $post_id = wp_insert_post($post_data, true);
+
+            if (is_wp_error($post_id)) {
+                throw new Exception($post_id->get_error_message());
+            }
+
+            // アイキャッチ画像生成
+            if (!empty($o['gen_featured'])) {
+                try {
+                    $hint = trim(isset($o['image_hint']) ? $o['image_hint'] : '');
+                    $img_prompt = $this->image_generator->build_prompt($final_title, $angle, $hint);
+
+                    $err = '';
+                    $b64 = $this->openai_client->generate_image($api_key, $img_prompt, '1792x1024', $err);
+                    
+                    if (!$b64) {
+                        $b64 = $this->openai_client->generate_image($api_key, $img_prompt, '1024x1024', $err);
+                    }
+                    
+                    if ($b64) {
+                        $msg = '';
+                        $att_id = $this->image_generator->save_as_attachment($b64, $final_title, $post_id, $msg);
+                        if ($att_id) {
+                            $this->image_generator->set_featured_image($post_id, $att_id);
+                        }
+                    }
+                } catch (Exception $e) {
+                    error_log('AI Auto Poster 定期実行: アイキャッチ生成エラー: ' . $e->getMessage());
+                }
+            }
+
+            error_log('AI Auto Poster 定期実行: 記事生成が完了しました（投稿ID: ' . $post_id . '）');
+
+        } catch (Exception $e) {
+            error_log('AI Auto Poster 定期実行エラー: ' . $e->getMessage());
+        } finally {
+            $this->release_lock();
+        }
     }
 
     function handle_queue_job() {
