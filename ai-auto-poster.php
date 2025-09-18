@@ -3,7 +3,7 @@
  * Plugin Name: AI Auto Poster Lite (Box)
  * Description: 最小構成。OpenAIのJSONをGutenbergブロックへ変換（見出し/段落/リスト/ボックス対応）+ タイトル/題材のバリエーション + 実行後は完了ログ表示 + アイキャッチ自動生成(DALL·E 3 フォールバック付)
  * Version: 0.4.3
- * Author: You
+ * Author: Yamada Koshin
  * Requires PHP: 7.3
  */
 if (!defined('ABSPATH')) exit;
