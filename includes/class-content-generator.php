@@ -23,9 +23,8 @@ class AIAP_Content_Generator {
         $o = get_option('aiap_lite_settings', array());
         $main_topic = isset($o['main_topic']) ? trim($o['main_topic']) : 'AGA';
         
-        // 有効なカテゴリ（中項目）を取得
+        // 有効なカテゴリを取得
         $topic_enabled = isset($o['topic_enabled']) ? $o['topic_enabled'] : array();
-        $topic_keywords = isset($o['topic_keywords']) ? $o['topic_keywords'] : array();
         
         // 有効なカテゴリのIDを抽出
         $enabled_category_ids = array();
@@ -36,7 +35,7 @@ class AIAP_Content_Generator {
         }
         
         if (empty($enabled_category_ids)) {
-            throw new Exception('有効なカテゴリ（中項目）が設定されていません。');
+            throw new Exception('有効なカテゴリが設定されていません。');
         }
         
         // ランダムにカテゴリを選択
@@ -48,8 +47,24 @@ class AIAP_Content_Generator {
             throw new Exception('選択されたカテゴリの取得に失敗しました。');
         }
         
-        $selected_topic = $selected_category->name;
-        $selected_keywords = isset($topic_keywords[$selected_cat_id]) ? $topic_keywords[$selected_cat_id] : '';
+        // カテゴリの階層関係を取得
+        $category_hierarchy = array();
+        $current_cat = $selected_category;
+        
+        // 親カテゴリまで遡る
+        while ($current_cat->parent) {
+            $parent = get_category($current_cat->parent);
+            if ($parent) {
+                array_unshift($category_hierarchy, $parent->name);
+            }
+            $current_cat = $parent;
+        }
+        
+        // 選択されたカテゴリ名を追加
+        $category_hierarchy[] = $selected_category->name;
+        
+        // カテゴリの文脈を構築
+        $selected_topic = implode(' > ', $category_hierarchy);
         
         // 選択されたカテゴリIDを保存（投稿時に使用）
         $this->current_category_id = $selected_cat_id;
@@ -59,11 +74,6 @@ class AIAP_Content_Generator {
         $prompt = <<<EOT
 根本テーマは「{$main_topic}」の「{$selected_topic}」について。
 EOT;
-
-        // 小項目が指定されている場合は追加
-        if ($detail_topic) {
-            $prompt .= "特に「{$detail_topic}」に焦点を当てる。\n";
-        }
 
         $prompt .= <<<EOT
 毎回、切り口を変え、同じ趣旨の繰り返しを避ける。
@@ -105,12 +115,12 @@ EOT;
      * 本文を生成
      */
     public function generate_content($api_key, $title, $angle, $outline) {
-        $system = 'あなたは医療系SEOに精通した日本語ライター。必ず有効なJSONを返す。Markdown/HTMLは返さない。';
+        $system = 'あなたはインターネット回線とWiFiに精通した日本語ライター。必ず有効なJSONを返す。Markdown/HTMLは返さない。';
         $outline_json = json_encode($outline, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
         $seed = wp_generate_uuid4();
         
         $prompt = <<<EOT
-ヘアクリニック向けブログ。タイトルに沿い、angleとoutlineを反映。
+インターネット回線の比較・解説ブログ。タイトルに沿い、angleとoutlineを反映。
 - title: {$title}
 - angle: {$angle}
 - outline: {$outline_json}

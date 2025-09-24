@@ -257,51 +257,179 @@ class AIAP_Lite_Box {
             ?></textarea>
         <?php }, 'aiap-lite-content_gen', 'content_gen');
 
-        // 中項目の管理（カテゴリベース）
-        add_settings_field('sub_topics_manager', '中項目の管理', function() {
+        // カテゴリの管理（階層構造対応）
+        add_action('admin_enqueue_scripts', function($hook) {
+            if ($hook === 'settings_page_aiap-lite') {
+                wp_enqueue_style('dashicons');
+                wp_add_inline_style('dashicons', '
+                    .category-tree-container .toggle-icon { cursor: pointer; }
+                    .category-tree-container .toggle-icon:before { 
+                        font-family: dashicons;
+                        font-size: 20px;
+                        line-height: 1;
+                        vertical-align: middle;
+                    }
+                    .category-tree-container .toggle-icon.collapsed:before { content: "\f345"; }
+                    .category-tree-container .toggle-icon.expanded:before { content: "\f347"; }
+                    .category-tree-container .category-children { display: none; }
+                    .category-tree-container .category-children.expanded { display: block; }
+                ');
+                
+                wp_add_inline_script('jquery', '
+                    jQuery(document).ready(function($) {
+                        // 折りたたみ機能
+                        $(".category-tree-container .toggle-icon").click(function() {
+                            var $this = $(this);
+                            var $children = $this.closest(".category-item").find("> .category-children");
+                            
+                            if ($this.hasClass("collapsed")) {
+                                $this.removeClass("collapsed").addClass("expanded");
+                                $children.addClass("expanded");
+                            } else {
+                                $this.removeClass("expanded").addClass("collapsed");
+                                $children.removeClass("expanded");
+                            }
+                        });
+                        
+                        // チェックボックスの連動
+                        $(".category-tree-container input[type=checkbox]").change(function() {
+                            var $this = $(this);
+                            var isChecked = $this.prop("checked");
+                            
+                            // 子孫要素のチェックボックスを更新
+                            $this.closest(".category-header")
+                                 .next(".category-children")
+                                 .find("input[type=checkbox]")
+                                 .prop("checked", isChecked);
+                            
+                            // 親要素のチェックボックス状態を更新
+                            var updateParentCheckbox = function($item) {
+                                var $parent = $item.parent().closest(".category-item");
+                                if ($parent.length) {
+                                    var $parentCheckbox = $parent.find("> .category-header input[type=checkbox]");
+                                    var $siblings = $parent.find("> .category-children .category-item > .category-header input[type=checkbox]");
+                                    var allChecked = $siblings.length === $siblings.filter(":checked").length;
+                                    var someChecked = $siblings.filter(":checked").length > 0;
+                                    
+                                    $parentCheckbox.prop({
+                                        "checked": allChecked,
+                                        "indeterminate": !allChecked && someChecked
+                                    });
+                                    
+                                    updateParentCheckbox($parent);
+                                }
+                            };
+                            
+                            updateParentCheckbox($this.closest(".category-item"));
+                        });
+                        
+                        // 初期状態で親カテゴリを展開し、チェックボックスの状態を更新
+                        $(".category-tree-container > .category-item > .category-header .toggle-icon").click();
+                        $(".category-tree-container input[type=checkbox]").first().trigger("change");
+                    });
+                ');
+            }
+        });
+
+        add_settings_field('sub_topics_manager', 'カテゴリの管理', function() {
             $o = get_option(self::OPT_KEY, array());
-            $categories = get_categories(array(
+            $topic_enabled = isset($o['topic_enabled']) ? $o['topic_enabled'] : array();
+
+            // 親カテゴリを取得
+            $parent_categories = get_categories(array(
                 'hide_empty' => false,
                 'orderby' => 'name',
-                'order' => 'ASC'
+                'order' => 'ASC',
+                'parent' => 0
             ));
-
-            // キーワード設定を取得
-            $topic_keywords = isset($o['topic_keywords']) ? $o['topic_keywords'] : array();
-            $topic_enabled = isset($o['topic_enabled']) ? $o['topic_enabled'] : array();
             ?>
-            <div class="sub-topics-manager">
-                <div class="topics-list">
-                    <?php if (!empty($categories)) : ?>
-                        <?php foreach ($categories as $category) : ?>
-                            <div class="topic-item" style="margin-bottom: 10px; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
-                                <div style="display: flex; gap: 10px; align-items: center;">
-                                    <span class="topic-title" style="font-weight: bold; min-width: 200px;">
-                                        <?php echo esc_html($category->name); ?>
-                                    </span>
-                                    <input type="text" 
-                                           name="<?php echo esc_attr(self::OPT_KEY); ?>[topic_keywords][<?php echo esc_attr($category->term_id); ?>]" 
-                                           value="<?php echo esc_attr(isset($topic_keywords[$category->term_id]) ? $topic_keywords[$category->term_id] : ''); ?>" 
-                                           placeholder="キーワード（カンマ区切り）"
-                                           class="regular-text"
-                                           style="flex: 1;">
-                                    <label style="white-space: nowrap;">
-                                        <input type="checkbox" 
-                                               name="<?php echo esc_attr(self::OPT_KEY); ?>[topic_enabled][<?php echo esc_attr($category->term_id); ?>]" 
-                                               value="1"
-                                               <?php checked(isset($topic_enabled[$category->term_id]) && $topic_enabled[$category->term_id]); ?>>
-                                        有効
-                                    </label>
-                                </div>
+            <div class="category-tree-container">
+                <?php if (!empty($parent_categories)) : ?>
+                    <?php foreach ($parent_categories as $parent) : ?>
+                        <div class="category-item">
+                            <div class="category-header" style="display: flex; gap: 10px; align-items: center; background: #f8f9fa; padding: 8px; border-radius: 4px; margin-bottom: 5px;">
+                                <span class="toggle-icon collapsed" style="width: 20px;"></span>
+                                <span class="category-name" style="font-weight: bold;">
+                                    <?php echo esc_html($parent->name); ?>
+                                </span>
+                                <label style="margin-left: auto;">
+                                    <input type="checkbox" 
+                                           name="<?php echo esc_attr(self::OPT_KEY); ?>[topic_enabled][<?php echo esc_attr($parent->term_id); ?>]" 
+                                           value="1"
+                                           <?php checked(isset($topic_enabled[$parent->term_id]) && $topic_enabled[$parent->term_id]); ?>>
+                                    有効
+                                </label>
                             </div>
-                        <?php endforeach; ?>
-                    <?php else : ?>
-                        <div class="notice notice-warning">
-                            <p>カテゴリが設定されていません。WordPressの投稿カテゴリを追加してください。</p>
+
+                            <?php
+                            // 子カテゴリを取得
+                            $children = get_categories(array(
+                                'hide_empty' => false,
+                                'parent' => $parent->term_id,
+                                'orderby' => 'name',
+                                'order' => 'ASC'
+                            ));
+
+                            if (!empty($children)) : ?>
+                                <div class="category-children" style="padding-left: 20px;">
+                                    <?php foreach ($children as $child) : ?>
+                                        <div class="category-item">
+                                            <div class="category-header" style="display: flex; gap: 10px; align-items: center; background: #f8f9fa; padding: 8px; border-radius: 4px; margin: 5px 0;">
+                                                <span class="toggle-icon collapsed" style="width: 20px;"></span>
+                                                <span class="category-name">
+                                                    <?php echo esc_html($child->name); ?>
+                                                </span>
+                                                <label style="margin-left: auto;">
+                                                    <input type="checkbox" 
+                                                           name="<?php echo esc_attr(self::OPT_KEY); ?>[topic_enabled][<?php echo esc_attr($child->term_id); ?>]" 
+                                                           value="1"
+                                                           <?php checked(isset($topic_enabled[$child->term_id]) && $topic_enabled[$child->term_id]); ?>>
+                                                    有効
+                                                </label>
+                                            </div>
+
+                                            <?php
+                                            // 孫カテゴリを取得
+                                            $grandchildren = get_categories(array(
+                                                'hide_empty' => false,
+                                                'parent' => $child->term_id,
+                                                'orderby' => 'name',
+                                                'order' => 'ASC'
+                                            ));
+
+                                            if (!empty($grandchildren)) : ?>
+                                                <div class="category-children" style="padding-left: 20px;">
+                                                    <?php foreach ($grandchildren as $grandchild) : ?>
+                                                        <div class="category-item">
+                                                            <div class="category-header" style="display: flex; gap: 10px; align-items: center; background: #f8f9fa; padding: 8px; border-radius: 4px; margin: 5px 0;">
+                                                                <span style="width: 20px;"></span>
+                                                                <span class="category-name">
+                                                                    <?php echo esc_html($grandchild->name); ?>
+                                                                </span>
+                                                                <label style="margin-left: auto;">
+                                                                    <input type="checkbox" 
+                                                                           name="<?php echo esc_attr(self::OPT_KEY); ?>[topic_enabled][<?php echo esc_attr($grandchild->term_id); ?>]" 
+                                                                           value="1"
+                                                                           <?php checked(isset($topic_enabled[$grandchild->term_id]) && $topic_enabled[$grandchild->term_id]); ?>>
+                                                                    有効
+                                                                </label>
+                                                            </div>
+                                                        </div>
+                                                    <?php endforeach; ?>
+                                                </div>
+                                            <?php endif; ?>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php endif; ?>
                         </div>
-                    <?php endif; ?>
-                </div>
-                <p class="description">カテゴリから中項目を管理します。有効な項目からランダムに選択して記事が生成されます。<br>カテゴリの追加・編集・削除は投稿 > カテゴリから行ってください。</p>
+                    <?php endforeach; ?>
+                <?php else : ?>
+                    <div class="notice notice-warning">
+                        <p>カテゴリが設定されていません。WordPressの投稿カテゴリを追加してください。</p>
+                    </div>
+                <?php endif; ?>
+                <p class="description">有効にしたカテゴリからランダムに選択して記事が生成されます。<br>カテゴリの追加・編集・削除は投稿 > カテゴリから行ってください。</p>
             </div>
             <?php
         }, 'aiap-lite-content_gen', 'content_gen');
