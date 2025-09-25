@@ -4,7 +4,7 @@ ini_set('display_errors', 1);
 error_reporting(E_ALL);
 
 // WordPress環境のロード（絶対パスで指定）
-require_once('/home/site2-ts/www/fc01-aga/ts/wp-load.php');
+require_once('/www/yk-test/media/wp-load.php');
 
 // セキュリティチェック
 if (php_sapi_name() !== 'cli') {
@@ -12,7 +12,7 @@ if (php_sapi_name() !== 'cli') {
 }
 
 // プラグインのメインクラスをロード（絶対パスで指定）
-require_once('/home/site2-ts/www/fc01-aga/ts/wp-content/plugins/ai-auto-poster/ai-auto-poster.php');
+require_once('/www/yk-test/media/wp-content/plugins/ai-auto-poster/ai-auto-poster.php');
 
 function generate_scheduled_post() {
     try {
