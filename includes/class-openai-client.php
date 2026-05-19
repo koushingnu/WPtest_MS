@@ -60,18 +60,18 @@ class AIAP_OpenAI_Client {
     }
 
     /**
-     * DALL·E 3で画像を生成
+     * GPT Image 1.5で画像を生成（DALL-E 3の後継モデル）
      */
     public function generate_image($api_key, $prompt, $size='1792x1024', &$err='') {
         $err = '';
 
         $data = [
-            'model' => 'dall-e-3',
+            'model' => 'gpt-image-1.5',
             'prompt' => $prompt,
             'size' => $size,
             'n' => 1,
-            'quality' => 'hd',
-            'style' => 'vivid'
+            'quality' => 'high',
+            'output_format' => 'png'
         ];
 
         $ch = curl_init('https://api.openai.com/v1/images/generations');
@@ -104,21 +104,15 @@ class AIAP_OpenAI_Client {
         }
 
         $result = json_decode($response, true);
-        if (!isset($result['data'][0]['url'])) {
-            $err = "画像URLが見つかりません: " . $response;
+        
+        // GPT Imageモデルはb64_jsonで直接base64データを返す
+        if (!isset($result['data'][0]['b64_json'])) {
+            $err = "画像データが見つかりません: " . $response;
             error_log('AI Auto Poster 画像生成エラー: ' . $err);
             return null;
         }
 
-        $imageUrl = $result['data'][0]['url'];
-        $image = file_get_contents($imageUrl);
-        
-        if ($image === false) {
-            $err = "画像のダウンロードに失敗しました";
-            error_log('AI Auto Poster 画像ダウンロードエラー: ' . $err);
-            return null;
-        }
-
-        return base64_encode($image);
+        // すでにbase64エンコードされているので、そのまま返す
+        return $result['data'][0]['b64_json'];
     }
 }

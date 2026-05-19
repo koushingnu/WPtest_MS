@@ -172,7 +172,8 @@ JSON形式で:
    {"type":"box","style":"point-box","title":"具体的なタイトル","items":[
      "この記事全体の重要ポイントを3-4個"
    ]},
-   {"type":"paragraph","text":"次のアクションを自然に案内"}
+   {"type":"paragraph","text":"次のアクションを自然に案内"},
+   {"type":"paragraph","text":"<strong>免責事項：</strong>本ページの内容は一般的な情報提供を目的としており、治療や処方の代替を意図するものではありません。症状に関しては必ず医師にご相談ください。"}
  ]
 }
 

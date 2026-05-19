@@ -14,6 +14,7 @@ require_once plugin_dir_path(__FILE__) . 'includes/class-openai-client.php';
 require_once plugin_dir_path(__FILE__) . 'includes/class-image-generator.php';
 require_once plugin_dir_path(__FILE__) . 'includes/class-content-generator.php';
 require_once plugin_dir_path(__FILE__) . 'includes/class-block-converter.php';
+require_once plugin_dir_path(__FILE__) . 'includes/class-security-scanner.php';
 
 class AIAP_Lite_Box {
     const OPT_KEY    = 'aiap_lite_settings';
@@ -26,6 +27,7 @@ class AIAP_Lite_Box {
     private $image_generator;
     private $content_generator;
     private $block_converter;
+    private $security_scanner;
     private $tabs;
 
     function __construct() {
@@ -35,6 +37,7 @@ class AIAP_Lite_Box {
         $this->image_generator = new AIAP_Image_Generator($this->logger);
         $this->content_generator = new AIAP_Content_Generator($this->openai_client, $this->logger);
         $this->block_converter = new AIAP_Block_Converter();
+        $this->security_scanner = new AIAP_Security_Scanner($this->logger);
 
         // タブ設定
         // タブIDとページスラッグの対応：
@@ -239,6 +242,38 @@ class AIAP_Lite_Box {
         add_settings_section('content_gen', 'コンテンツ生成設定', function() {
             echo '<p>記事生成のテーマと内容を設定します。</p>';
         }, 'aiap-lite-content_gen');
+
+        // === セキュリティタブ ===
+        add_settings_section('security_scan', 'セキュリティスキャン', function() {
+            echo '<p>サイトのセキュリティ状況をチェックします。</p>';
+            echo '<div class="notice notice-info inline">';
+            echo '<p><strong>注意：</strong> このスキャンはGoogle Ads/AdSenseの警告対策として設計されています。</p>';
+            echo '</div>';
+        }, 'aiap-lite-security');
+
+        add_settings_field('security_scan_button', 'セキュリティスキャン実行', function() {
+            echo '<button type="button" id="run-security-scan" class="button button-secondary">セキュリティスキャンを実行</button>';
+            echo '<div id="security-scan-results" style="margin-top: 15px;"></div>';
+            echo '<script>
+                jQuery(document).ready(function($) {
+                    $("#run-security-scan").click(function() {
+                        var $button = $(this);
+                        var $results = $("#security-scan-results");
+                        
+                        $button.prop("disabled", true).text("スキャン中...");
+                        $results.html("<div class=\"notice notice-info inline\"><p>スキャンを実行中です...</p></div>");
+                        
+                        $.post(ajaxurl, {
+                            action: "aiap_security_scan",
+                            nonce: "' . wp_create_nonce('aiap_security_scan') . '"
+                        }, function(response) {
+                            $results.html(response);
+                            $button.prop("disabled", false).text("セキュリティスキャンを実行");
+                        });
+                    });
+                });
+            </script>';
+        }, 'aiap-lite-security', 'security_scan');
 
         // 大項目設定
         add_settings_field('main_topic', '大項目（メインテーマ）', function() {
@@ -678,7 +713,10 @@ class AIAP_Lite_Box {
                 'post_title'   => $final_title,
                 'post_content' => $post_content,
                 'post_status'  => isset($o['post_status']) ? $o['post_status'] : 'draft',
-                'post_author'  => 1
+                'post_author'  => 1,
+                'meta_input'   => array(
+                    '_yoast_wpseo_meta-robots-noindex' => '1'  // 自動生成投稿をnoindexに設定
+                )
             );
 
             // 選択されたカテゴリを設定
@@ -827,7 +865,10 @@ class AIAP_Lite_Box {
                 'post_title'   => $final_title,
                 'post_content' => $post_content,
                 'post_status'  => isset($o['post_status']) ? $o['post_status'] : 'draft',
-                'post_author'  => get_current_user_id() ?: 1
+                'post_author'  => get_current_user_id() ?: 1,
+                'meta_input'   => array(
+                    '_yoast_wpseo_meta-robots-noindex' => '1'  // 自動生成投稿をnoindexに設定
+                )
             );
 
             // 選択されたカテゴリを設定

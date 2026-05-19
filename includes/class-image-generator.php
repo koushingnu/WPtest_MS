@@ -50,6 +50,22 @@ class AIAP_Image_Generator {
         require_once(ABSPATH . 'wp-admin/includes/image.php');
         require_once(ABSPATH . 'wp-admin/includes/media.php');
 
+        // base64データの安全性チェック
+        if (empty($b64) || !is_string($b64)) {
+            $msg = 'base64データが無効です';
+            $this->logger->log('⚠️ ' . $msg);
+            return 0;
+        }
+
+        // base64文字列がHTML本文に出力されないよう安全化
+        $b64 = trim($b64);
+        if (strpos($b64, 'data:image') === 0) {
+            // data:image形式の場合は画像データ部分のみ抽出
+            if (preg_match('/data:image\/[^;]+;base64,(.+)/', $b64, $matches)) {
+                $b64 = $matches[1];
+            }
+        }
+
         $data = base64_decode($b64);
         if (!$data) {
             $msg = 'base64デコード失敗';

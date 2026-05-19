@@ -1,0 +1,17 @@
+# AI Auto Poster セキュリティ設定
+# uploadsディレクトリでのPHP実行を禁止
+
+<FilesMatch "\.(php|php5|php7|phtml)$">
+  Order Allow,Deny
+  Deny from all
+</FilesMatch>
+
+Options -ExecCGI
+
+# 追加のセキュリティヘッダー
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options nosniff
+    Header always set X-Frame-Options DENY
+    Header always set X-XSS-Protection "1; mode=block"
+</IfModule>
+
